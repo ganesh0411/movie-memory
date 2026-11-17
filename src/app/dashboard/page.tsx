@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
-import { FactCard } from "@/components/fact-card";
 import { LogoutButton } from "@/components/logout-button";
+import { MoviePanel } from "@/components/movie-panel";
 import { UserAvatar } from "@/components/user-avatar";
 import { requireUser } from "@/lib/dal";
 import { displayName } from "@/lib/user-display";
@@ -35,14 +35,7 @@ async function DashboardGate() {
         <LogoutButton />
       </section>
 
-      <p className="text-zinc-600 dark:text-zinc-400">
-        Your favorite movie:{" "}
-        <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-          {user.favoriteMovie}
-        </span>
-      </p>
-
-      <FactCard />
+      <MoviePanel initialMe={user} />
     </div>
   );
 }

@@ -1,21 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
-import { api, ApiError } from "@/lib/api";
+import { useIsMutating, useQuery } from "@tanstack/react-query";
+import { ApiError } from "@/lib/api";
+import { factQuery, UPDATE_MOVIE_KEY } from "@/lib/queries";
 
-export function FactCard() {
-  const { data, error, isPending, isFetching, refetch } = useQuery({
-    queryKey: ["fact"],
-    queryFn: api.getFact,
-    // Every fetch costs an OpenAI call: only fetch on mount and on "New fact".
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
-    // The server already retries OpenAI once with a 10s timeout; retrying here
-    // too could leave the user waiting a minute.
-    retry: false,
+export function FactCard({ userId, movie }: { userId: string; movie: string }) {
+  // While a movie save is pending, `movie` is the optimistic (unsaved) title.
+  // The server still has the old movie, so fetching now would cache an
+  // old-movie fact under the new key. Wait until the save settles.
+  const saving = useIsMutating({ mutationKey: UPDATE_MOVIE_KEY }) > 0;
+
+  const { data, error, isFetching, refetch } = useQuery({
+    ...factQuery(userId, movie),
+    enabled: !saving,
   });
 
+  // Backstop: each fact records the movie it was generated for. Never show a
+  // fact for a different movie than the one on screen.
+  const fact = data && data.movie === movie ? data : undefined;
   const needsMovie = error instanceof ApiError && error.code === "NO_FAVORITE_MOVIE";
 
   return (
@@ -27,14 +30,9 @@ export function FactCard() {
         Fun fact
       </h2>
 
-      {isPending && !error && (
-        <div aria-busy="true" aria-label="Loading fact" className="flex flex-col gap-2">
-          <div className="h-4 w-full animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
-          <div className="h-4 w-2/3 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
-        </div>
-      )}
-
-      {error && (
+      {saving ? (
+        <p className="text-zinc-500">Saving your movie…</p>
+      ) : error && !isFetching ? (
         <p role="alert" className="text-sm text-red-600 dark:text-red-400">
           {error.message}{" "}
           {needsMovie && (
@@ -43,25 +41,29 @@ export function FactCard() {
             </Link>
           )}
         </p>
-      )}
-
-      {data &&
-        (data.content ? (
+      ) : fact ? (
+        fact.content ? (
           <p className={isFetching ? "opacity-50 transition-opacity" : "transition-opacity"}>
-            {data.content}
+            {fact.content}
           </p>
         ) : (
           <p className="text-zinc-500">No fact yet. Try generating one.</p>
-        ))}
+        )
+      ) : (
+        <div aria-busy="true" aria-label="Loading fact" className="flex flex-col gap-2">
+          <div className="h-4 w-full animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
+          <div className="h-4 w-2/3 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
+        </div>
+      )}
 
       {!needsMovie && (
         <button
           type="button"
           onClick={() => refetch()}
-          disabled={isFetching}
+          disabled={isFetching || saving}
           className="self-start rounded-lg bg-zinc-900 px-4 py-2 text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
         >
-          {isFetching ? "Thinking…" : error && !data ? "Try again" : "New fact"}
+          {isFetching ? "Thinking…" : error && !fact ? "Try again" : "New fact"}
         </button>
       )}
     </section>

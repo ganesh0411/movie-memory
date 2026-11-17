@@ -20,6 +20,28 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## What I'd improve
+
+- **Server-side cap on fact generation.** The 30-second fact cache is client-only
+  (TanStack Query, in memory). `GET /api/fact` still calls OpenAI and stores a row on
+  every request that reaches it: a reload, a direct hit on the URL, or a cross-site
+  top-level navigation (the `SameSite=Lax` session cookie is sent on those). I'd add:
+  - a server check: if this user got a fact for this movie in the last 30s, return
+    it without calling OpenAI. The lookup must filter on the session user's id, with
+    a test for that.
+  - a per-user rate limit (e.g. N generations per minute), so "New fact" can skip
+    the 30s check without making the cap meaningless.
+- **Persisting the fact cache across reloads** (`sessionStorage` keyed by user +
+  movie) was considered and declined. A reload is a deliberate fresh start, and 30s
+  is too short a window to justify per-user storage keys, clearing it on sign-out on
+  shared machines, and showing stored facts only after the page loads in the
+  browser. Cost: a reload within 30s spends one extra OpenAI call.
+- **GET vs POST.** `GET /api/fact` creates a row, which HTTP semantics discourage.
+  I kept GET because the spec names it and it maps onto `useQuery`; with the server
+  cap above it becomes mostly a read. Otherwise I'd split it into
+  `POST /api/fact` (generate) and `GET /api/fact/latest` (read).
+- **More UI tests:** an RTL test for the onboarding form.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
