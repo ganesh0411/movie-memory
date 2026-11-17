@@ -2,14 +2,10 @@ import "server-only";
 import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
+import type { Me } from "@/lib/schemas";
 
-export type CurrentUser = {
-  id: string;
-  name: string | null;
-  email: string | null;
-  image: string | null;
-  favoriteMovie: string | null;
-};
+// Same shape the API returns from GET /api/me, so the two can't drift.
+export type CurrentUser = Me;
 
 // Data access layer: the only place pages read the session.
 // userId always comes from here (the server session), never from client input.

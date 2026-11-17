@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { LogoutButton } from "@/components/logout-button";
+import { MovieForm } from "@/components/movie-form";
 import { requireUser } from "@/lib/dal";
 import { displayName } from "@/lib/user-display";
 
@@ -22,8 +23,9 @@ async function OnboardingGate() {
   return (
     <div className="flex flex-col gap-6">
       <p className="text-zinc-600 dark:text-zinc-400">
-        Hi {displayName(user)}! Pick your favorite movie — coming next.
+        Hi {displayName(user)}! Tell us your favorite movie to get started.
       </p>
+      <MovieForm />
       <div>
         <LogoutButton />
       </div>
