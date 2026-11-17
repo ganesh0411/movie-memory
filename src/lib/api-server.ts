@@ -4,13 +4,15 @@ import { getCurrentUser, type CurrentUser } from "@/lib/dal";
 import type { ErrorCode } from "@/lib/schemas";
 
 // Every API response is either { data } or { error: { code, message } }.
+// All responses are per-user, so nothing may be stored by browsers or proxies.
+const NO_STORE = { "Cache-Control": "no-store" };
 
 export function ok<T>(data: T, status = 200): Response {
-  return Response.json({ data }, { status });
+  return Response.json({ data }, { status, headers: NO_STORE });
 }
 
 export function fail(status: number, code: ErrorCode, message: string): Response {
-  return Response.json({ error: { code, message } }, { status });
+  return Response.json({ error: { code, message } }, { status, headers: NO_STORE });
 }
 
 type AuthedHandler = (req: Request, user: CurrentUser) => Promise<Response> | Response;

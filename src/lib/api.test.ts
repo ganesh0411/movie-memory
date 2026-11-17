@@ -52,12 +52,20 @@ describe("api.getMe", () => {
     expect(err).toMatchObject({ status: 500, code: "INTERNAL" });
   });
 
-  it("maps a non-JSON error body by status (e.g. proxy HTML 502)", async () => {
+  it("maps a non-JSON error body by status (HTML 500 → INTERNAL)", async () => {
+    server.use(
+      http.get("*/api/me", () => HttpResponse.text("<html>Server Error</html>", { status: 500 })),
+    );
+    const err = await catchApiError(api.getMe);
+    expect(err).toMatchObject({ status: 500, code: "INTERNAL" });
+  });
+
+  it("maps a non-JSON 502 from a proxy to UPSTREAM_ERROR", async () => {
     server.use(
       http.get("*/api/me", () => HttpResponse.text("<html>Bad Gateway</html>", { status: 502 })),
     );
     const err = await catchApiError(api.getMe);
-    expect(err).toMatchObject({ status: 502, code: "INTERNAL" });
+    expect(err).toMatchObject({ status: 502, code: "UPSTREAM_ERROR" });
   });
 
   it("maps a network failure to NETWORK_ERROR with status 0", async () => {
@@ -77,6 +85,66 @@ describe("api.getMe", () => {
   it("maps a 200 without the { data } envelope to BAD_RESPONSE", async () => {
     server.use(http.get("*/api/me", () => HttpResponse.json(me)));
     const err = await catchApiError(api.getMe);
+    expect(err.code).toBe("BAD_RESPONSE");
+  });
+});
+
+describe("api.getFact", () => {
+  const fact = {
+    id: "f1",
+    movie: "Alien",
+    content: "A fun fact.",
+    createdAt: "2026-11-17T12:00:00.000Z",
+  };
+
+  it("returns a typed fact", async () => {
+    server.use(http.get("*/api/fact", () => HttpResponse.json({ data: fact })));
+    await expect(api.getFact()).resolves.toEqual(fact);
+  });
+
+  it("maps 409 to NO_FAVORITE_MOVIE", async () => {
+    server.use(
+      http.get("*/api/fact", () =>
+        HttpResponse.json(
+          { error: { code: "NO_FAVORITE_MOVIE", message: "Pick a favorite movie first." } },
+          { status: 409 },
+        ),
+      ),
+    );
+    const err = await catchApiError(api.getFact);
+    expect(err).toMatchObject({ status: 409, code: "NO_FAVORITE_MOVIE" });
+  });
+
+  it("maps 502 to UPSTREAM_ERROR with the server's friendly message", async () => {
+    server.use(
+      http.get("*/api/fact", () =>
+        HttpResponse.json(
+          { error: { code: "UPSTREAM_ERROR", message: "Couldn't come up with a fact." } },
+          { status: 502 },
+        ),
+      ),
+    );
+    const err = await catchApiError(api.getFact);
+    expect(err).toMatchObject({
+      status: 502,
+      code: "UPSTREAM_ERROR",
+      message: "Couldn't come up with a fact.",
+    });
+  });
+
+  it("maps a non-JSON 504 to UPSTREAM_ERROR by status", async () => {
+    server.use(http.get("*/api/fact", () => HttpResponse.text("Gateway Timeout", { status: 504 })));
+    const err = await catchApiError(api.getFact);
+    expect(err).toMatchObject({ status: 504, code: "UPSTREAM_ERROR" });
+  });
+
+  it("rejects a fact with a non-ISO createdAt as BAD_RESPONSE", async () => {
+    server.use(
+      http.get("*/api/fact", () =>
+        HttpResponse.json({ data: { ...fact, createdAt: "yesterday" } }),
+      ),
+    );
+    const err = await catchApiError(api.getFact);
     expect(err.code).toBe("BAD_RESPONSE");
   });
 });

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ErrorBody, Me, MovieInput, type ErrorCode } from "@/lib/schemas";
+import { ErrorBody, Fact, Me, MovieInput, type ErrorCode } from "@/lib/schemas";
 
 // The payload itself is checked against the per-call schema in request().
 const DataEnvelope = z.object({ data: z.unknown() });
@@ -28,6 +28,8 @@ function codeForStatus(status: number): ErrorCode {
   if (status === 401) return "UNAUTHORIZED";
   if (status === 400 || status === 422) return "VALIDATION_ERROR";
   if (status === 404) return "NOT_FOUND";
+  if (status === 409) return "NO_FAVORITE_MOVIE";
+  if (status === 502 || status === 503 || status === 504) return "UPSTREAM_ERROR";
   return "INTERNAL";
 }
 
@@ -83,6 +85,8 @@ async function request<T extends z.ZodType>(
 
 export const api = {
   getMe: () => request("/api/me", Me),
+
+  getFact: () => request("/api/fact", Fact),
 
   updateMovie: async (movie: string) => {
     // Same rules the server enforces: instant feedback without a round trip.

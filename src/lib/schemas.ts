@@ -6,12 +6,22 @@ import { z } from "zod";
 
 // ---------- Inputs ----------
 
+// Invisible "format" characters (zero-width space, BOM, soft hyphen, bidi
+// controls…), except ZWNJ/ZWJ (U+200C/U+200D), which carry meaning inside
+// emoji sequences and scripts like Persian.
+const INVISIBLE = /(?![‌‍])\p{Cf}/gu;
+// At least one character that is neither whitespace nor invisible.
+const VISIBLE = /[^\s\p{Cf}]/u;
+
 export const MovieInput = z.object({
   movie: z
     .string()
+    .overwrite((s) => s.replace(INVISIBLE, ""))
     .trim()
     .min(1, "Please enter a movie title.")
-    .max(100, "Movie title must be 100 characters or fewer."),
+    .max(100, "Movie title must be 100 characters or fewer.")
+    // Catches titles made only of the joiners kept above.
+    .refine((s) => VISIBLE.test(s), "Please enter a movie title."),
 });
 export type MovieInput = z.infer<typeof MovieInput>;
 
@@ -42,6 +52,8 @@ export const ErrorCode = z.enum([
   "UNAUTHORIZED",
   "VALIDATION_ERROR",
   "NOT_FOUND",
+  "NO_FAVORITE_MOVIE", // 409: action needs a favorite movie first
+  "UPSTREAM_ERROR", // 502: the AI provider failed or timed out
   "INTERNAL",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
