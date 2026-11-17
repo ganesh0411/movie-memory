@@ -4,11 +4,13 @@ import { PrismaClient } from "@/generated/prisma/client";
 function createClient() {
   // Runtime uses Neon's POOLED url so serverless invocations don't exhaust
   // Postgres connections. Migrations use DIRECT_URL (see prisma.config.ts).
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    throw new Error("DATABASE_URL is not set");
-  }
-  return new PrismaClient({ adapter: new PrismaNeon({ connectionString }) });
+  //
+  // No connection happens until the first query, so no guard here: `next build`
+  // imports this module and must work without DATABASE_URL. A missing URL
+  // surfaces on the first query ("No database host or connection string...").
+  return new PrismaClient({
+    adapter: new PrismaNeon({ connectionString: process.env.DATABASE_URL }),
+  });
 }
 
 // Reuse one client across Next.js dev hot reloads to avoid leaking connections.
