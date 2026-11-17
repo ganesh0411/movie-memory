@@ -1,12 +1,13 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import type { ReactNode } from "react";
 import { server } from "@/test/msw";
 import { MoviePanel } from "@/components/movie-panel";
+import { createQueryClient } from "@/lib/query-client";
 import type { Me } from "@/lib/schemas";
 
 vi.mock("next/link", () => ({
@@ -88,7 +89,8 @@ const title = () => screen.getByRole("strong");
 beforeEach(() => {
   serverMovie = "Alien";
   factCalls = 0;
-  client = new QueryClient();
+  // The app's real client config (retry rules, networkMode).
+  client = createQueryClient();
   server.use(meHandler, factHandler());
 });
 
@@ -96,6 +98,7 @@ afterEach(() => {
   cleanup();
   client.clear();
   vi.useRealTimers();
+  onlineManager.setOnline(true);
 });
 
 // ---------- Inline edit ----------
@@ -142,6 +145,28 @@ describe("inline movie edit", () => {
     expect(factCalls).toBe(1);
   });
 
+  it("offline: fails fast, rolls back, and says the server is unreachable", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await screen.findByText("fact #1 about Alien");
+
+    // What DevTools "Offline" does: the browser reports offline and fetch fails.
+    onlineManager.setOnline(false);
+    server.use(http.put("*/api/me/movie", () => HttpResponse.error()));
+
+    await startEditing(user, "Heat");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Can't reach the server. Check your connection.",
+    );
+    expect(client.getQueryData<Me>(["me"])?.favoriteMovie).toBe("Alien");
+    expect(screen.getByLabelText("Favorite movie")).toHaveValue("Heat");
+    // Not stuck: the save settled, so the fact card is back for the old movie.
+    expect(screen.queryByText("Saving your movie…")).not.toBeInTheDocument();
+    expect(screen.getByText("fact #1 about Alien")).toBeInTheDocument();
+  });
+
   it("Cancel restores the original title without a request", async () => {
     const user = userEvent.setup();
     renderPanel();
@@ -167,6 +192,73 @@ describe("inline movie edit", () => {
     expect(screen.getByLabelText("Favorite movie")).toBeInTheDocument();
     expect(client.getQueryData<Me>(["me"])?.favoriteMovie).toBe("Alien");
   });
+});
+
+// ---------- Save commits on the server, response lost on the client ----------
+
+describe("lost save response", () => {
+  // The PUT reaches the server and commits, but fetch rejects (response lost).
+  const putCommitsThenFails = http.put("*/api/me/movie", async ({ request }) => {
+    serverMovie = ((await request.json()) as { movie: string }).movie;
+    return HttpResponse.error();
+  });
+
+  it("network fine: verifies with the server and ends as a success", async () => {
+    const user = userEvent.setup();
+    server.use(putCommitsThenFails);
+    renderPanel();
+    await screen.findByText("fact #1 about Alien");
+
+    await startEditing(user, "Jaws");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await screen.findByText("fact #2 about Jaws");
+    expect(title()).toHaveTextContent("Jaws");
+    expect(client.getQueryData<Me>(["me"])?.favoriteMovie).toBe("Jaws");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(client.getQueryData(["fact", "u1", "Alien"])).toBeUndefined();
+    // Settled as a success (no rollback / error flash), not healed afterwards.
+    expect(client.getMutationCache().getAll()[0].state.status).toBe("success");
+  });
+
+  it("offline: rolls back with an error, then heals to the server's value on reconnect", async () => {
+    const user = userEvent.setup();
+    let netUp = true;
+    server.use(
+      putCommitsThenFails,
+      http.get("*/api/me", () => (netUp ? HttpResponse.json({ data: me() }) : HttpResponse.error())),
+    );
+    renderPanel();
+    await screen.findByText("fact #1 about Alien");
+
+    // DevTools "Offline": the browser reports offline and every request fails.
+    onlineManager.setOnline(false);
+    netUp = false;
+    await startEditing(user, "Jaws");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Can't reach the server.");
+    expect(client.getQueryData<Me>(["me"])?.favoriteMovie).toBe("Alien");
+    expect(serverMovie).toBe("Jaws"); // the divergence we must heal
+
+    // Let the ["me"] re-sync exhaust its retries (1s + 2s backoff), so only
+    // the reconnect can fix the cache.
+    await waitFor(
+      () => expect(client.getQueryCache().find({ queryKey: ["me"] })?.state.status).toBe("error"),
+      { timeout: 5_000 },
+    );
+
+    netUp = true;
+    act(() => onlineManager.setOnline(true));
+
+    // Healed: cache, title, and fact all match the server; the stale error and
+    // reopened editor are gone because the save actually landed.
+    await screen.findByText("fact #2 about Jaws", {}, { timeout: 900 });
+    expect(client.getQueryData<Me>(["me"])?.favoriteMovie).toBe("Jaws");
+    expect(title()).toHaveTextContent("Jaws");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Favorite movie")).not.toBeInTheDocument();
+  }, 10_000);
 });
 
 // ---------- Fact cache ----------
@@ -200,6 +292,28 @@ describe("fact cache", () => {
     expect(factCalls).toBe(2);
   });
 
+  it("keeps the current fact with a small note when a refetch fails", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await screen.findByText("fact #1 about Alien");
+
+    server.use(
+      http.get("*/api/fact", () =>
+        HttpResponse.json(
+          { error: { code: "UPSTREAM_ERROR", message: "Couldn't come up with a fact right now." } },
+          { status: 502 },
+        ),
+      ),
+    );
+    await user.click(screen.getByRole("button", { name: "New fact" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Couldn't get a new fact: Couldn't come up with a fact right now.",
+    );
+    expect(screen.getByText("fact #1 about Alien")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New fact" })).toBeEnabled();
+  });
+
   it("fetches a fresh fact on a view after 30s", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-11-17T12:00:00Z"));
@@ -213,6 +327,22 @@ describe("fact cache", () => {
 
     await screen.findByText("fact #2 about Alien");
     expect(factCalls).toBe(2);
+  });
+
+  it("doesn't refetch a stale fact on reconnect (each fetch is an OpenAI call)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-17T12:00:00Z"));
+    renderPanel();
+    await screen.findByText("fact #1 about Alien");
+
+    vi.setSystemTime(new Date("2026-11-17T12:00:31Z")); // fact is now stale
+    act(() => {
+      onlineManager.setOnline(false);
+      onlineManager.setOnline(true);
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(factCalls).toBe(1);
   });
 
   it("invalidates the cached fact when the movie changes", async () => {

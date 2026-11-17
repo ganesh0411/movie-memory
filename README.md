@@ -31,6 +31,15 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
     a test for that.
   - a per-user rate limit (e.g. N generations per minute), so "New fact" can skip
     the 30s check without making the cap meaningless.
+- **Re-sync when the network returns without an "online" event.** If a save's
+  response is lost (the server committed, the client didn't hear back) and the
+  follow-up check fails too, the client rolls back and marks `["me"]` stale. It heals
+  on the next reconnect event or window focus. But if the network recovers without the
+  browser ever reporting offline (a server or proxy blip, flaky Wi-Fi) and the tab
+  keeps focus, the UI shows the old movie until something triggers a refetch. Options:
+  - light polling of `["me"]` (e.g. `refetchInterval` while a query is in error), or
+  - versioned writes: the PUT carries the version the client last saw and the server
+    returns the current one, so a retried or "lost" save resolves without guessing.
 - **Persisting the fact cache across reloads** (`sessionStorage` keyed by user +
   movie) was considered and declined. A reload is a deliberate fresh start, and 30s
   is too short a window to justify per-user storage keys, clearing it on sign-out on

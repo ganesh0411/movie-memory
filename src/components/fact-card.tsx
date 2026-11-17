@@ -32,6 +32,23 @@ export function FactCard({ userId, movie }: { userId: string; movie: string }) {
 
       {saving ? (
         <p className="text-zinc-500">Saving your movie…</p>
+      ) : fact ? (
+        // A failed refetch keeps the fact we already have for this movie and
+        // adds a small note, instead of replacing it with an error.
+        <>
+          {fact.content ? (
+            <p className={isFetching ? "opacity-50 transition-opacity" : "transition-opacity"}>
+              {fact.content}
+            </p>
+          ) : (
+            <p className="text-zinc-500">No fact yet. Try generating one.</p>
+          )}
+          {error && !isFetching && (
+            <p role="alert" className="text-xs text-red-600 dark:text-red-400">
+              Couldn&apos;t get a new fact: {error.message}
+            </p>
+          )}
+        </>
       ) : error && !isFetching ? (
         <p role="alert" className="text-sm text-red-600 dark:text-red-400">
           {error.message}{" "}
@@ -41,14 +58,6 @@ export function FactCard({ userId, movie }: { userId: string; movie: string }) {
             </Link>
           )}
         </p>
-      ) : fact ? (
-        fact.content ? (
-          <p className={isFetching ? "opacity-50 transition-opacity" : "transition-opacity"}>
-            {fact.content}
-          </p>
-        ) : (
-          <p className="text-zinc-500">No fact yet. Try generating one.</p>
-        )
       ) : (
         <div aria-busy="true" aria-label="Loading fact" className="flex flex-col gap-2">
           <div className="h-4 w-full animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />

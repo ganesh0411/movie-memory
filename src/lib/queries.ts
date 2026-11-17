@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import type { Me } from "@/lib/schemas";
 
 // Query keys and options in one place so components and tests agree.
@@ -19,14 +19,31 @@ export function factQuery(userId: string, movie: string) {
     // "New fact" calls refetch(), which ignores staleTime.
     staleTime: 30_000,
     gcTime: 5 * 60_000,
-    // Every fetch costs an OpenAI call; refocusing the tab isn't a new view.
+    // Every fetch costs an OpenAI call: refocusing the tab or reconnecting
+    // isn't a new view. (Only ["me"] heals on reconnect; see query-client.ts.)
     refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     // The server already retries OpenAI once with a 10s timeout.
     retry: false,
   };
 }
 
 export const UPDATE_MOVIE_KEY = ["updateMovie"] as const;
+
+// A NETWORK_ERROR doesn't mean the write didn't happen: the request may have
+// reached the server and committed, with only the response lost. Before
+// reporting failure (and rolling back), ask the server what it has now.
+export async function saveMovieVerified(movie: string): Promise<Me> {
+  try {
+    return await api.updateMovie(movie);
+  } catch (err) {
+    if (err instanceof ApiError && err.code === "NETWORK_ERROR") {
+      const current = await api.getMe().catch(() => null);
+      if (current?.favoriteMovie === movie) return current; // it landed
+    }
+    throw err;
+  }
+}
 
 // Optimistic movie update. Callers pass an already-validated, trimmed title
 // (MovieInput); api.updateMovie validates again before sending.
@@ -35,7 +52,7 @@ export function useUpdateMovie() {
 
   return useMutation({
     mutationKey: UPDATE_MOVIE_KEY,
-    mutationFn: api.updateMovie,
+    mutationFn: saveMovieVerified,
 
     onMutate: async (movie: string) => {
       // 1. Stop any in-flight ["me"] refetch so it can't land afterwards and
@@ -70,7 +87,9 @@ export function useUpdateMovie() {
     },
 
     onSettled: () => {
-      // Re-sync with the server either way (e.g. another tab changed it).
+      // Re-sync with the server either way (e.g. another tab changed it). If
+      // this refetch fails too (offline), ["me"] stays invalidated and heals
+      // on reconnect or window focus (see query-client.ts).
       void queryClient.invalidateQueries({ queryKey: meQuery.queryKey });
     },
   });

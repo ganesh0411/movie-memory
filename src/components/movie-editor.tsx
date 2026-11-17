@@ -11,7 +11,14 @@ export function MovieEditor({ me }: { me: Me }) {
   const [localError, setLocalError] = useState<string | null>(null);
   const mutation = useUpdateMovie();
 
-  const error = localError ?? (mutation.isError ? mutation.error.message : null);
+  // A save reported as failed can turn out to have landed: a later re-sync
+  // (reconnect / focus) shows the title we tried to save. Then there's nothing
+  // to fix: hide the error and the reopened editor. Derived at render time.
+  const landedAnyway = mutation.isError && me.favoriteMovie === mutation.variables;
+  const showEditor = editing && !landedAnyway;
+
+  const error =
+    localError ?? (mutation.isError && !landedAnyway ? mutation.error.message : null);
 
   function startEdit() {
     mutation.reset();
@@ -57,7 +64,7 @@ export function MovieEditor({ me }: { me: Me }) {
     </p>
   );
 
-  if (!editing) {
+  if (!showEditor) {
     return (
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-3">
