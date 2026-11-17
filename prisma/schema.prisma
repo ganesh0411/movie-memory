@@ -1,0 +1,85 @@
+// Prisma 7: connection URLs live in prisma.config.ts (CLI) and the
+// Neon driver adapter in src/lib/db.ts (runtime), not here.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------- Auth.js (@auth/prisma-adapter) models ----------
+// Field names/keys must match the adapter exactly.
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // null = user still needs onboarding
+  favoriteMovie String?
+
+  accounts Account[]
+  sessions Session[]
+  facts    Fact[]
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+// ---------- App models ----------
+
+model Fact {
+  id        String   @id @default(cuid())
+  userId    String
+  // Snapshot of the movie at generation time; survives favoriteMovie changes.
+  movie     String
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Serves "latest facts for this user" (newest-first lists + cache checks).
+  @@index([userId, createdAt])
+}
