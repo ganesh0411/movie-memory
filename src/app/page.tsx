@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signInWithGoogle } from "@/app/actions/auth";
 import { getCurrentUser } from "@/lib/dal";
@@ -17,6 +18,9 @@ export default function Home() {
       <Suspense fallback={<div className="h-12" />}>
         <LandingGate />
       </Suspense>
+      <Link href="/privacy" className="text-sm text-zinc-500 underline">
+        Privacy
+      </Link>
     </main>
   );
 }
